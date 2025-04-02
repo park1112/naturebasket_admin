@@ -91,7 +91,7 @@ class DashboardController extends GetxController {
         // 주문 상품 세부 정보
         List<dynamic> items = data['items'] ?? [];
         for (var item in items) {
-          productsSold += item['quantity'] ?? 0;
+          productsSold += int.parse((item['quantity'] ?? 0).toString());
 
           // 카테고리별 매출
           String category = item['category'] ?? 'uncategorized';
@@ -103,8 +103,8 @@ class DashboardController extends GetxController {
           // 인기 상품
           String productId = item['productId'] ?? '';
           if (productId.isNotEmpty) {
-            topProducts[productId] =
-                (topProducts[productId] ?? 0) + (item['quantity'] ?? 0);
+            topProducts[productId] = (topProducts[productId] ?? 0) +
+                int.parse((item['quantity'] ?? 0).toString());
           }
         }
       }

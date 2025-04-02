@@ -5,8 +5,10 @@ import 'package:fl_chart/fl_chart.dart';
 class OrdersSummary extends StatelessWidget {
   final Map<String, dynamic> orderStatusCounts;
 
-  const OrdersSummary({Key? key, required this.orderStatusCounts})
-      : super(key: key);
+  const OrdersSummary({
+    Key? key,
+    required this.orderStatusCounts,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -17,7 +19,7 @@ class OrdersSummary extends StatelessWidget {
     }
 
     // 상태별 색상 지정
-    final statusColors = {
+    const statusColors = {
       'pending': Colors.blue,
       'confirmed': Colors.green,
       'processing': Colors.purple,
@@ -28,7 +30,7 @@ class OrdersSummary extends StatelessWidget {
     };
 
     // 상태별 이름 지정
-    final statusNames = {
+    const statusNames = {
       'pending': '주문 접수',
       'confirmed': '주문 확인',
       'processing': '처리 중',
@@ -39,20 +41,23 @@ class OrdersSummary extends StatelessWidget {
     };
 
     // 차트 데이터 생성
-    List<PieChartSectionData> sections = [];
+    final List<PieChartSectionData> sections = [];
     int totalOrders = 0;
 
-    orderStatusCounts.forEach((status, count) {
+    // 총 주문 수 계산
+    for (final count in orderStatusCounts.values) {
       totalOrders += count as int;
-    });
+    }
 
+    // 섹션 데이터 생성
     orderStatusCounts.forEach((status, count) {
       final double percentage =
           totalOrders > 0 ? (count as int) / totalOrders * 100 : 0;
+      final color = statusColors[status] ?? Colors.grey;
 
       sections.add(
         PieChartSectionData(
-          color: statusColors[status] ?? Colors.grey,
+          color: color,
           value: count.toDouble(),
           title: '${percentage.toStringAsFixed(1)}%',
           radius: 60,
@@ -61,6 +66,18 @@ class OrdersSummary extends StatelessWidget {
             fontSize: 12,
             fontWeight: FontWeight.bold,
           ),
+          badgeWidget: _Badge(
+            color: color,
+            child: Text(
+              count.toString(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          badgePositionPercentageOffset: 1.2,
         ),
       );
     });
@@ -90,6 +107,9 @@ class OrdersSummary extends StatelessWidget {
           spacing: 16,
           runSpacing: 8,
           children: orderStatusCounts.entries.map((entry) {
+            final color = statusColors[entry.key] ?? Colors.grey;
+            final name = statusNames[entry.key] ?? entry.key;
+
             return Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -97,13 +117,13 @@ class OrdersSummary extends StatelessWidget {
                   width: 12,
                   height: 12,
                   decoration: BoxDecoration(
-                    color: statusColors[entry.key] ?? Colors.grey,
+                    color: color,
                     shape: BoxShape.circle,
                   ),
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  '${statusNames[entry.key] ?? entry.key}: ${entry.value}',
+                  '$name: ${entry.value}',
                   style: const TextStyle(
                     fontSize: 12,
                   ),
@@ -113,6 +133,28 @@ class OrdersSummary extends StatelessWidget {
           }).toList(),
         ),
       ],
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  final Color color;
+  final Widget child;
+
+  const _Badge({
+    required this.color,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+      ),
+      child: child,
     );
   }
 }
