@@ -15,6 +15,8 @@
 - **v0.0.3**
    - 상품 추가, 사용자 추가, 사용자 회원가입(이건안됨) , 완료 
    - 주문수정, 주문관련 생성해야됨, 
+- **v0.0.5**
+
   
 
 
@@ -39,7 +41,7 @@
 
     git commit -m "버전 1.0.0 추가"
 
-    git branch -m main <새롭게 할때만 해야함>
+    git branch -m main       <새롭게 할때만 해야함>
 
     git tag -a v1.0.0 -m "버전 1.0.0 릴리즈"
 
@@ -62,7 +64,7 @@
     https://github.com/<계정명>/naturebasket_user-main.git
 
     2. 그 다음 로컬 저장소에서 Remote를 설정합니다.
-    git remote add origin https://github.com/park1112/naturebasket_user.git
+     git remote add origin https://github.com/park1112/naturebasket_admin.git
    
     3. 이제 다시 push 해주세요.
     git push -u origin main
