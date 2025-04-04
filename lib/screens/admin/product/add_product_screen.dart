@@ -1,7 +1,7 @@
-// lib/screens/admin/product/add_product_screen.dart 수정사항
-
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 import '../../../controllers/product_controller.dart';
 import '../../../controllers/admin_auth_controller.dart';
 import '../../../models/product_model.dart';
@@ -26,13 +26,43 @@ class _AddProductScreenState extends State<AddProductScreen> {
   final _priceController = TextEditingController();
   final _discountPriceController = TextEditingController();
   final _stockController = TextEditingController();
-  String _selectedCategory = ProductCategory.eco.toString().split('.').last;
+  final _maxOrderQuantityController = TextEditingController();
+  final _originController = TextEditingController();
   final _tagsController = TextEditingController();
   final _ecoLabelsController = TextEditingController();
+  final _shippingOriginController = TextEditingController();
+  final _shippingFeeController = TextEditingController();
+
+  // 판매 기간 컨트롤러
+  final _salesStartDateController = TextEditingController();
+  final _salesEndDateController = TextEditingController();
+
+  // 옵션 관련 컨트롤러
+  final List<Map<String, dynamic>> _options = [];
+  final _optionNameController = TextEditingController();
+  final _optionPriceController = TextEditingController();
+  final _optionStockController = TextEditingController();
+
+  // 선택 상태 변수
+  String _selectedCategory = ProductCategory.food.toString().split('.').last;
+  TaxType _selectedTaxType = TaxType.taxable;
+  bool _hasShipping = true;
+  ShippingMethod _selectedShippingMethod = ShippingMethod.standardDelivery;
+  ShippingType _selectedShippingType = ShippingType.standard;
+  ShippingFeeType _selectedShippingFeeType = ShippingFeeType.free;
+  List<int> _selectedHolidayDays = [];
+  DateTime? _salesStartDate;
+  DateTime? _salesEndDate;
+
+  // 체크박스 상태
   bool _isEco = false;
   bool _isOrganic = false;
   bool _isFeatured = false;
   bool _isActive = true;
+  bool _isSameDayShipping = false;
+
+  // 상품 설명 이미지
+  final RxList<String> _descriptionImages = <String>[].obs;
 
   @override
   void initState() {
@@ -42,8 +72,11 @@ class _AddProductScreenState extends State<AddProductScreen> {
       _productController.loadCategories();
       _productController.clearImages();
 
-      // 재고 기본값 설정
+      // 기본값 설정
       _stockController.text = '0';
+      _maxOrderQuantityController.text = '10';
+      _originController.text = '국내산';
+      _shippingFeeController.text = '0';
 
       // 카테고리 초기화를 비동기로 처리
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -72,8 +105,17 @@ class _AddProductScreenState extends State<AddProductScreen> {
     _priceController.dispose();
     _discountPriceController.dispose();
     _stockController.dispose();
+    _maxOrderQuantityController.dispose();
+    _originController.dispose();
     _tagsController.dispose();
     _ecoLabelsController.dispose();
+    _salesStartDateController.dispose();
+    _salesEndDateController.dispose();
+    _shippingOriginController.dispose();
+    _shippingFeeController.dispose();
+    _optionNameController.dispose();
+    _optionPriceController.dispose();
+    _optionStockController.dispose();
     super.dispose();
   }
 
@@ -100,14 +142,15 @@ class _AddProductScreenState extends State<AddProductScreen> {
           return;
         }
 
+        // 가격 정보 처리
+        double originalPrice = double.parse(_priceController.text);
         double? discountPrice;
         if (_discountPriceController.text.isNotEmpty) {
           discountPrice = double.tryParse(_discountPriceController.text);
         }
-
-        double originalPrice = double.parse(_priceController.text);
         double sellingPrice = discountPrice ?? originalPrice;
 
+        // 태그 및 라벨 처리
         List<String> tags = _tagsController.text
             .split(',')
             .map((tag) => tag.trim())
@@ -120,25 +163,81 @@ class _AddProductScreenState extends State<AddProductScreen> {
             .where((label) => label.isNotEmpty)
             .toList();
 
-        bool success = await _productController.createProduct(
+        // 배송 정보 생성
+        Map<String, dynamic> sameDaySettings = {};
+        if (_selectedShippingType == ShippingType.sameDay &&
+            _isSameDayShipping) {
+          sameDaySettings = {
+            'cutoffTime': '13:00', // 기본값으로 13시 설정
+            'availableOnWeekends': false,
+          };
+        }
+
+        double? shippingFee;
+        if (_selectedShippingFeeType == ShippingFeeType.paid &&
+            _shippingFeeController.text.isNotEmpty) {
+          shippingFee = double.tryParse(_shippingFeeController.text);
+        }
+
+        // 옵션 처리
+        List<ProductOption> productOptions = _options.map((option) {
+          return ProductOption(
+            id: const Uuid().v4(), // 새 옵션은 고유 ID 생성
+            name: option['name'],
+            additionalPrice: option['price'],
+            stockQuantity: option['stock'],
+            isAvailable: option['isAvailable'],
+          );
+        }).toList();
+
+        // 배송 정보 생성
+        ShippingInfo shippingInfo = ShippingInfo(
+          hasShipping: _hasShipping,
+          method: _selectedShippingMethod,
+          type: _selectedShippingType,
+          sameDaySettings: _isSameDayShipping ? sameDaySettings : null,
+          holidayDays: _selectedHolidayDays,
+          feeType: _selectedShippingFeeType,
+          feeAmount: shippingFee,
+          shippingOrigin: _shippingOriginController.text.isNotEmpty
+              ? _shippingOriginController.text
+              : null,
+        );
+
+        bool success = await _productController.createProductExtended(
           name: _nameController.text,
           description: _descriptionController.text,
+          descriptionImages: _descriptionImages.toList(),
           price: originalPrice,
-          salePrice: discountPrice,
+          discountPrice: discountPrice,
           sellingPrice: sellingPrice,
           stockQuantity: int.parse(_stockController.text),
+          maxOrderQuantity: int.parse(_maxOrderQuantityController.text),
+          origin: _originController.text,
           category: _selectedCategory,
+          options: productOptions,
           tags: tags,
           isEco: _isEco,
+          ecoLabels: ecoLabels.isEmpty ? null : ecoLabels,
           isOrganic: _isOrganic,
           isFeatured: _isFeatured,
           isActive: _isActive,
+          salesStartDate: _salesStartDate,
+          salesEndDate: _salesEndDate,
+          taxType: _selectedTaxType,
+          shippingInfo: shippingInfo,
           averageRating: 0.0,
           reviewCount: 0,
         );
 
         if (success) {
           Get.back();
+          Get.snackbar(
+            '성공',
+            '상품이 성공적으로 등록되었습니다.',
+            snackPosition: SnackPosition.BOTTOM,
+            backgroundColor: Colors.green.withOpacity(0.1),
+          );
         }
       } catch (e) {
         Get.snackbar(
@@ -149,6 +248,148 @@ class _AddProductScreenState extends State<AddProductScreen> {
         );
       }
     }
+  }
+
+  // 판매 시작일 선택
+  Future<void> _selectSalesStartDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _salesStartDate ?? DateTime.now(),
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+    );
+    if (picked != null) {
+      setState(() {
+        _salesStartDate = picked;
+        _salesStartDateController.text =
+            DateFormat('yyyy-MM-dd').format(picked);
+      });
+    }
+  }
+
+  // 판매 종료일 선택
+  Future<void> _selectSalesEndDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _salesEndDate ??
+          (_salesStartDate ?? DateTime.now()).add(const Duration(days: 30)),
+      firstDate: _salesStartDate ?? DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+    );
+    if (picked != null) {
+      setState(() {
+        _salesEndDate = picked;
+        _salesEndDateController.text = DateFormat('yyyy-MM-dd').format(picked);
+      });
+    }
+  }
+
+  // 옵션 추가 다이얼로그
+  void _showAddOptionDialog() {
+    _optionNameController.text = '';
+    _optionPriceController.text = '0';
+    _optionStockController.text = '0';
+    bool isAvailable = true;
+
+    Get.dialog(
+      AlertDialog(
+        title: const Text('옵션 추가'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _optionNameController,
+                decoration: const InputDecoration(
+                  labelText: '옵션명',
+                  hintText: '예: 사이즈, 색상 등',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _optionPriceController,
+                decoration: const InputDecoration(
+                  labelText: '추가 금액',
+                  hintText: '예: 1000',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _optionStockController,
+                decoration: const InputDecoration(
+                  labelText: '재고 수량',
+                  hintText: '예: 10',
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+              StatefulBuilder(
+                builder: (context, setState) {
+                  return SizedBox(
+                    width: 200,
+                    child: CheckboxListTile(
+                      title: const Text('판매 가능'),
+                      value: isAvailable,
+                      onChanged: (value) {
+                        setState(() {
+                          isAvailable = value ?? true;
+                        });
+                      },
+                      controlAffinity: ListTileControlAffinity.leading,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(),
+            child: const Text('취소'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // 옵션 추가
+              if (_optionNameController.text.isNotEmpty) {
+                setState(() {
+                  _options.add({
+                    'name': _optionNameController.text,
+                    'price':
+                        double.tryParse(_optionPriceController.text) ?? 0.0,
+                    'stock': int.tryParse(_optionStockController.text) ?? 0,
+                    'isAvailable': isAvailable,
+                  });
+                });
+                Get.back();
+              } else {
+                Get.snackbar(
+                  '알림',
+                  '옵션명을 입력해주세요.',
+                  snackPosition: SnackPosition.BOTTOM,
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryColor,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('추가'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 옵션 삭제
+  void _removeOption(int index) {
+    setState(() {
+      _options.removeAt(index);
+    });
   }
 
   @override
@@ -173,12 +414,13 @@ class _AddProductScreenState extends State<AddProductScreen> {
               child: Form(
                 key: _formKey,
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // 이미지 섹션
                     _buildImageSection(isSmallScreen),
                     const SizedBox(height: 24),
 
-                    // 콘텐츠 섹션
+                    // 콘텐츠 섹션 (반응형 레이아웃)
                     if (width >= 900)
                       IntrinsicHeight(
                         child: Row(
@@ -211,8 +453,26 @@ class _AddProductScreenState extends State<AddProductScreen> {
                           _buildAdditionalInfoSection(),
                         ],
                       ),
+
                     const SizedBox(height: 24),
+
+                    // 옵션 섹션
+                    _buildOptionsSection(),
+                    const SizedBox(height: 24),
+
+                    // 판매 기간 섹션
+                    _buildSalesPeriodSection(),
+                    const SizedBox(height: 24),
+
+                    // 배송 정보 섹션
+                    _buildShippingInfoSection(),
+                    const SizedBox(height: 24),
+
+                    // 등록 버튼
                     _buildSubmitButton(),
+
+                    // 여백 추가
+                    const SizedBox(height: 60),
                   ],
                 ),
               ),
@@ -224,48 +484,43 @@ class _AddProductScreenState extends State<AddProductScreen> {
   }
 
   Widget _buildImageSection(bool isSmallScreen) {
-    return SizedBox(
-      // height를 더 여유있게 조정하거나 아예 높이를 없애서 유동적으로 조절되게 만드세요.
-      // 예: height 제거 또는 더 크게 (400 정도 추천)
-      height: isSmallScreen ? null : 400, // 이렇게 변경하거나 아예 삭제 추천
-      child: Card(
-        elevation: 2,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min, // 여기를 추가하여 높이를 최소화
-            children: [
-              const Text(
-                '상품 이미지',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '상품 이미지',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            AspectRatio(
+              aspectRatio: 3 / 2,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return Obx(() {
+                    final hasImages =
+                        _productController.selectedImages.isNotEmpty;
+                    return Container(
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: hasImages
+                          ? _buildImagePreview(isSmallScreen, constraints)
+                          : _buildEmptyImagePlaceholder(),
+                    );
+                  });
+                },
               ),
-              const SizedBox(height: 16),
-              AspectRatio(
-                aspectRatio: 3 / 2, // 이미지 영역의 비율을 고정하여 일관된 표시
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    return Obx(() {
-                      final hasImages =
-                          _productController.selectedImages.isNotEmpty;
-                      return Container(
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey.shade300),
-                        ),
-                        child: hasImages
-                            ? _buildImagePreview(isSmallScreen, constraints)
-                            : _buildEmptyImagePlaceholder(),
-                      );
-                    });
-                  },
-                ),
-              ),
-              const SizedBox(height: 16),
-              _buildImageButtons(isSmallScreen),
-            ],
-          ),
+            ),
+            const SizedBox(height: 16),
+            _buildImageButtons(isSmallScreen),
+          ],
         ),
       ),
     );
@@ -413,6 +668,8 @@ class _AddProductScreenState extends State<AddProductScreen> {
               ),
             ),
             const SizedBox(height: 16),
+
+            // 상품명 입력
             TextFormField(
               controller: _nameController,
               decoration: const InputDecoration(
@@ -428,152 +685,171 @@ class _AddProductScreenState extends State<AddProductScreen> {
               },
             ),
             const SizedBox(height: 16),
-            if (isSmallScreen) ...[
-              TextFormField(
-                controller: _priceController,
-                decoration: const InputDecoration(
-                  labelText: '정상가(원)',
-                  border: OutlineInputBorder(),
-                  hintText: '예: 5000',
+
+            // 원산지와 부가세 유형
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _originController,
+                    decoration: const InputDecoration(
+                      labelText: '원산지',
+                      border: OutlineInputBorder(),
+                      hintText: '예: 국내산, 중국산 등',
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return '원산지를 입력해주세요.';
+                      }
+                      return null;
+                    },
+                  ),
                 ),
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return '가격을 입력해주세요.';
-                  }
-                  if (double.tryParse(value) == null) {
-                    return '유효한 숫자를 입력해주세요.';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _discountPriceController,
-                decoration: const InputDecoration(
-                  labelText: '할인가(원)',
-                  border: OutlineInputBorder(),
-                  helperText: '미입력 시 할인 없음',
-                  hintText: '예: 4500',
+                const SizedBox(width: 16),
+                Expanded(
+                  child: DropdownButtonFormField<TaxType>(
+                    decoration: const InputDecoration(
+                      labelText: '부가세 유형',
+                      border: OutlineInputBorder(),
+                    ),
+                    value: _selectedTaxType,
+                    items: TaxType.values.map((type) {
+                      String label;
+                      switch (type) {
+                        case TaxType.taxable:
+                          label = '과세상품';
+                          break;
+                        case TaxType.taxFree:
+                          label = '면세상품';
+                          break;
+                        case TaxType.zeroTax:
+                          label = '영세상품';
+                          break;
+                      }
+                      return DropdownMenuItem<TaxType>(
+                        value: type,
+                        child: Text(label),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() {
+                          _selectedTaxType = value;
+                        });
+                      }
+                    },
+                  ),
                 ),
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value != null && value.isNotEmpty) {
-                    if (double.tryParse(value) == null) {
-                      return '유효한 숫자를 입력해주세요.';
-                    }
-                    if (_priceController.text.isNotEmpty &&
-                        double.parse(value) >=
-                            double.parse(_priceController.text)) {
-                      return '할인가는 정상가보다 작아야 합니다.';
-                    }
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _stockController,
-                decoration: const InputDecoration(
-                  labelText: '재고 수량',
-                  border: OutlineInputBorder(),
-                  hintText: '예: 100',
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // 가격 정보
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _priceController,
+                    decoration: const InputDecoration(
+                      labelText: '정상가(원)',
+                      border: OutlineInputBorder(),
+                      hintText: '예: 5000',
+                    ),
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return '가격을 입력해주세요.';
+                      }
+                      if (double.tryParse(value) == null) {
+                        return '유효한 숫자를 입력해주세요.';
+                      }
+                      return null;
+                    },
+                  ),
                 ),
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return '재고 수량을 입력해주세요.';
-                  }
-                  if (int.tryParse(value) == null) {
-                    return '유효한 숫자를 입력해주세요.';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              _buildCategoryDropdown(),
-            ] else ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _priceController,
-                      decoration: const InputDecoration(
-                        labelText: '정상가(원)',
-                        border: OutlineInputBorder(),
-                        hintText: '예: 5000',
-                      ),
-                      keyboardType: TextInputType.number,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return '가격을 입력해주세요.';
-                        }
+                const SizedBox(width: 16),
+                Expanded(
+                  child: TextFormField(
+                    controller: _discountPriceController,
+                    decoration: const InputDecoration(
+                      labelText: '할인가(원)',
+                      border: OutlineInputBorder(),
+                      helperText: '미입력 시 할인 없음',
+                      hintText: '예: 4500',
+                    ),
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value != null && value.isNotEmpty) {
                         if (double.tryParse(value) == null) {
                           return '유효한 숫자를 입력해주세요.';
                         }
-                        return null;
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _discountPriceController,
-                      decoration: const InputDecoration(
-                        labelText: '할인가(원)',
-                        border: OutlineInputBorder(),
-                        helperText: '미입력 시 할인 없음',
-                        hintText: '예: 4500',
-                      ),
-                      keyboardType: TextInputType.number,
-                      validator: (value) {
-                        if (value != null && value.isNotEmpty) {
-                          if (double.tryParse(value) == null) {
-                            return '유효한 숫자를 입력해주세요.';
-                          }
-                          if (_priceController.text.isNotEmpty &&
-                              double.parse(value) >=
-                                  double.parse(_priceController.text)) {
-                            return '할인가는 정상가보다 작아야 합니다.';
-                          }
+                        if (_priceController.text.isNotEmpty &&
+                            double.parse(value) >=
+                                double.parse(_priceController.text)) {
+                          return '할인가는 정상가보다 작아야 합니다.';
                         }
-                        return null;
-                      },
-                    ),
+                      }
+                      return null;
+                    },
                   ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _stockController,
-                      decoration: const InputDecoration(
-                        labelText: '재고 수량',
-                        border: OutlineInputBorder(),
-                        hintText: '예: 100',
-                      ),
-                      keyboardType: TextInputType.number,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return '재고 수량을 입력해주세요.';
-                        }
-                        if (int.tryParse(value) == null) {
-                          return '유효한 숫자를 입력해주세요.';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _buildCategoryDropdown(),
-                  ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
             const SizedBox(height: 16),
+
+            // 재고 및 주문 수량
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _stockController,
+                    decoration: const InputDecoration(
+                      labelText: '재고 수량',
+                      border: OutlineInputBorder(),
+                      hintText: '예: 100',
+                    ),
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return '재고 수량을 입력해주세요.';
+                      }
+                      if (int.tryParse(value) == null) {
+                        return '유효한 숫자를 입력해주세요.';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: TextFormField(
+                    controller: _maxOrderQuantityController,
+                    decoration: const InputDecoration(
+                      labelText: '최대 주문 수량',
+                      border: OutlineInputBorder(),
+                      hintText: '예: 10',
+                    ),
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return '최대 주문 수량을 입력해주세요.';
+                      }
+                      if (int.tryParse(value) == null) {
+                        return '유효한 숫자를 입력해주세요.';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // 카테고리 선택
+            _buildCategoryDropdown(),
+            const SizedBox(height: 16),
+
+            // 친환경 인증 정보
             TextFormField(
               controller: _ecoLabelsController,
               decoration: const InputDecoration(
@@ -583,9 +859,14 @@ class _AddProductScreenState extends State<AddProductScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            Row(
+
+            // 체크박스 그룹
+            Wrap(
+              spacing: 16,
+              runSpacing: 8,
               children: [
-                Expanded(
+                SizedBox(
+                  width: 200,
                   child: CheckboxListTile(
                     title: const Text('친환경'),
                     value: _isEco,
@@ -598,7 +879,8 @@ class _AddProductScreenState extends State<AddProductScreen> {
                     contentPadding: EdgeInsets.zero,
                   ),
                 ),
-                Expanded(
+                SizedBox(
+                  width: 200,
                   child: CheckboxListTile(
                     title: const Text('유기농'),
                     value: _isOrganic,
@@ -611,16 +893,8 @@ class _AddProductScreenState extends State<AddProductScreen> {
                     contentPadding: EdgeInsets.zero,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            // GetX의 자주 발생하는 오류(Improper use of GetX)를 방지하기 위해 체크박스 부분 분리
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
                 SizedBox(
-                  width: isSmallScreen ? double.infinity : 140,
+                  width: 200,
                   child: CheckboxListTile(
                     title: const Text('추천 상품'),
                     value: _isFeatured,
@@ -634,7 +908,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
                   ),
                 ),
                 SizedBox(
-                  width: isSmallScreen ? double.infinity : 150,
+                  width: 200,
                   child: CheckboxListTile(
                     title: const Text('판매 활성화'),
                     value: _isActive,
@@ -688,6 +962,94 @@ class _AddProductScreenState extends State<AddProductScreen> {
                 return null;
               },
             ),
+            const SizedBox(height: 16),
+            const Text(
+              '설명 이미지 추가',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      // 이미지 선택 후 설명 이미지 목록에 추가
+                      final result = await _productController.pickSingleImage();
+                      if (result != null) {
+                        _descriptionImages.add(result);
+                      }
+                    },
+                    icon: const Icon(Icons.add_photo_alternate),
+                    label: const Text('이미지 추가'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Obx(
+              () => _descriptionImages.isEmpty
+                  ? const Text('설명 이미지가 없습니다.',
+                      style: TextStyle(color: Colors.grey))
+                  : SizedBox(
+                      height: 100,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _descriptionImages.length,
+                        itemBuilder: (context, index) {
+                          return Stack(
+                            children: [
+                              Container(
+                                width: 100,
+                                height: 100,
+                                margin: const EdgeInsets.only(right: 8),
+                                decoration: BoxDecoration(
+                                  border:
+                                      Border.all(color: Colors.grey.shade300),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(
+                                    _descriptionImages[index],
+                                    fit: BoxFit.cover,
+                                    errorBuilder:
+                                        (context, error, stackTrace) =>
+                                            const Center(
+                                      child:
+                                          Icon(Icons.error, color: Colors.red),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                right: 8,
+                                top: 0,
+                                child: InkWell(
+                                  onTap: () =>
+                                      _descriptionImages.removeAt(index),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: const BoxDecoration(
+                                      color: Colors.black54,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.close,
+                                      size: 16,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+            ),
           ],
         ),
       ),
@@ -711,7 +1073,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
             ),
             const SizedBox(height: 16),
             TextFormField(
-              controller: _tagsController, // _tagsController가 선언되어 있어야 합니다.
+              controller: _tagsController,
               decoration: const InputDecoration(
                 labelText: '태그',
                 border: OutlineInputBorder(),
@@ -719,40 +1081,412 @@ class _AddProductScreenState extends State<AddProductScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            // --- Row 대신 Wrap 사용 ---
             Wrap(
-              alignment: WrapAlignment.spaceBetween, // 최대한 양 끝으로 배치 시도
-              crossAxisAlignment: WrapCrossAlignment.center, // 세로 중앙 정렬
-              spacing: 16.0, // 가로 여백 (줄바꿈 안될 때)
-              runSpacing: 8.0, // 세로 여백 (줄바꿈될 때)
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 16.0,
+              runSpacing: 8.0,
               children: [
-                // 왼쪽 텍스트 (크기 제한이 없으므로 그대로 둠)
                 const Text(
                   '신규 카테고리 추가',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                // 오른쪽 버튼 (크기가 고정될 수 있으므로 그대로 둠)
                 ElevatedButton.icon(
-                  onPressed:
-                      _showAddCategoryDialog, // _showAddCategoryDialog 함수가 정의되어 있어야 함
-                  icon: const Icon(Icons.add, size: 18), // 아이콘 크기 조정 가능
+                  onPressed: _showAddCategoryDialog,
+                  icon: const Icon(Icons.add, size: 18),
                   label: const Text('카테고리 추가'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primaryColor,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8), // 버튼 내부 패딩 조정 가능
-                    textStyle: const TextStyle(fontSize: 14), // 버튼 텍스트 크기 조정 가능
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    textStyle: const TextStyle(fontSize: 14),
                   ),
                 ),
               ],
             ),
-            // --- Wrap 사용 끝 ---
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildOptionsSection() {
+    // 가격 포맷터 (필요에 따라 사용)
+    final currencyFormat = NumberFormat('#,##0');
+
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Expanded(
+                  child: Text(
+                    '상품 옵션',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _showAddOptionDialog,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('옵션 추가'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryColor, // AppTheme 사용 확인
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _options.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding:
+                          EdgeInsets.symmetric(vertical: 16.0), // 위아래 여백 추가
+                      child: Text('등록된 옵션이 없습니다.'),
+                    ),
+                  )
+                // --- 변경된 부분 시작 ---
+                : ListView.builder(
+                    shrinkWrap:
+                        true, // 중요: Column 내부에서 ListView가 자신의 콘텐츠 크기만큼만 차지하도록 함
+                    physics:
+                        const NeverScrollableScrollPhysics(), // 중요: 부모 스크롤뷰와 스크롤 충돌 방지
+                    itemCount: _options.length,
+                    itemBuilder: (context, index) {
+                      final option = _options[index];
+                      // 옵션 데이터 타입 확인 (Map<String, dynamic> 가정)
+                      final String name = option['name'] ?? '이름 없음';
+                      final double price = (option['price'] is num)
+                          ? (option['price'] as num).toDouble()
+                          : 0.0;
+                      final int stock = (option['stock'] is num)
+                          ? (option['stock'] as num).toInt()
+                          : 0;
+                      final bool isAvailable = (option['isAvailable'] is bool)
+                          ? option['isAvailable']
+                          : false;
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          title: Text(name),
+                          subtitle: Text(
+                            '추가 금액: ${currencyFormat.format(price)}원 | 재고: ${stock}개 | 판매 상태: ${isAvailable ? '판매중' : '품절'}',
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            // _removeOption 함수가 index를 받도록 수정되었다고 가정
+                            // 만약 option 객체를 받는다면: onPressed: () => _removeOption(option),
+                            onPressed: () => _removeOption(index),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+            // --- 변경된 부분 끝 ---
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSalesPeriodSection() {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '판매 기간',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              '미입력 시 상시 판매 상품으로 등록됩니다.',
+              style: TextStyle(color: Colors.grey, fontSize: 14),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _salesStartDateController,
+                    readOnly: true,
+                    onTap: _selectSalesStartDate,
+                    decoration: InputDecoration(
+                      labelText: '판매 시작일',
+                      border: const OutlineInputBorder(),
+                      hintText: '선택하기',
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.calendar_today),
+                        onPressed: _selectSalesStartDate,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: TextFormField(
+                    controller: _salesEndDateController,
+                    readOnly: true,
+                    onTap: _selectSalesEndDate,
+                    decoration: InputDecoration(
+                      labelText: '판매 종료일',
+                      border: const OutlineInputBorder(),
+                      hintText: '선택하기',
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.calendar_today),
+                        onPressed: _selectSalesEndDate,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShippingInfoSection() {
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '배송 정보',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            SwitchListTile(
+              title: const Text('배송 여부'),
+              subtitle: Text(_hasShipping ? '배송함' : '배송 없음'),
+              value: _hasShipping,
+              onChanged: (value) {
+                setState(() {
+                  _hasShipping = value;
+                });
+              },
+              contentPadding: EdgeInsets.zero,
+            ),
+            if (_hasShipping) ...[
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<ShippingMethod>(
+                      decoration: const InputDecoration(
+                        labelText: '배송 방법',
+                        border: OutlineInputBorder(),
+                      ),
+                      value: _selectedShippingMethod,
+                      items: ShippingMethod.values.map((method) {
+                        String label;
+                        switch (method) {
+                          case ShippingMethod.standardDelivery:
+                            label = '일반택배';
+                            break;
+                          case ShippingMethod.directDelivery:
+                            label = '직접배송';
+                            break;
+                        }
+                        return DropdownMenuItem<ShippingMethod>(
+                          value: method,
+                          child: Text(label),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() {
+                            _selectedShippingMethod = value;
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: DropdownButtonFormField<ShippingType>(
+                      decoration: const InputDecoration(
+                        labelText: '배송 속성',
+                        border: OutlineInputBorder(),
+                      ),
+                      value: _selectedShippingType,
+                      items: ShippingType.values.map((type) {
+                        String label;
+                        switch (type) {
+                          case ShippingType.standard:
+                            label = '일반배송';
+                            break;
+                          case ShippingType.sameDay:
+                            label = '오늘출발';
+                            break;
+                        }
+                        return DropdownMenuItem<ShippingType>(
+                          value: type,
+                          child: Text(label),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() {
+                            _selectedShippingType = value;
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              if (_selectedShippingType == ShippingType.sameDay) ...[
+                SwitchListTile(
+                  title: const Text('오늘출발 설정'),
+                  subtitle: const Text('13시 이전 주문 시 당일 출고'),
+                  value: _isSameDayShipping,
+                  onChanged: (value) {
+                    setState(() {
+                      _isSameDayShipping = value;
+                    });
+                  },
+                  contentPadding: EdgeInsets.zero,
+                ),
+                const SizedBox(height: 16),
+              ],
+              const Text('휴무일 지정',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  _buildDayCheckbox(1, '월'),
+                  _buildDayCheckbox(2, '화'),
+                  _buildDayCheckbox(3, '수'),
+                  _buildDayCheckbox(4, '목'),
+                  _buildDayCheckbox(5, '금'),
+                  _buildDayCheckbox(6, '토'),
+                  _buildDayCheckbox(7, '일'),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<ShippingFeeType>(
+                      decoration: const InputDecoration(
+                        labelText: '배송비 유형',
+                        border: OutlineInputBorder(),
+                      ),
+                      value: _selectedShippingFeeType,
+                      items: ShippingFeeType.values.map((feeType) {
+                        String label;
+                        switch (feeType) {
+                          case ShippingFeeType.free:
+                            label = '무료배송';
+                            break;
+                          case ShippingFeeType.paid:
+                            label = '유료배송';
+                            break;
+                        }
+                        return DropdownMenuItem<ShippingFeeType>(
+                          value: feeType,
+                          child: Text(label),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() {
+                            _selectedShippingFeeType = value;
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                  if (_selectedShippingFeeType == ShippingFeeType.paid) ...[
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _shippingFeeController,
+                        decoration: const InputDecoration(
+                          labelText: '배송비(원)',
+                          border: OutlineInputBorder(),
+                          hintText: '예: 3000',
+                        ),
+                        keyboardType: TextInputType.number,
+                        validator: (value) {
+                          if (_selectedShippingFeeType ==
+                                  ShippingFeeType.paid &&
+                              (value == null || value.isEmpty)) {
+                            return '배송비를 입력해주세요.';
+                          }
+                          if (value != null &&
+                              value.isNotEmpty &&
+                              double.tryParse(value) == null) {
+                            return '유효한 숫자를 입력해주세요.';
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _shippingOriginController,
+                decoration: const InputDecoration(
+                  labelText: '출고지 주소',
+                  border: OutlineInputBorder(),
+                  hintText: '예: 서울특별시 강남구 테헤란로 123',
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDayCheckbox(int day, String label) {
+    return FilterChip(
+      label: Text(label),
+      selected: _selectedHolidayDays.contains(day),
+      onSelected: (selected) {
+        setState(() {
+          if (selected) {
+            _selectedHolidayDays.add(day);
+          } else {
+            _selectedHolidayDays.remove(day);
+          }
+        });
+      },
+      selectedColor: AppTheme.primaryColor.withOpacity(0.2),
+      checkmarkColor: AppTheme.primaryColor,
     );
   }
 
@@ -859,9 +1593,30 @@ class _AddProductScreenState extends State<AddProductScreen> {
         border: OutlineInputBorder(),
       ),
       items: ProductCategory.values.map((category) {
+        String label;
+        switch (category) {
+          case ProductCategory.food:
+            label = '식품';
+            break;
+          case ProductCategory.living:
+            label = '생활용품';
+            break;
+          case ProductCategory.beauty:
+            label = '뷰티';
+            break;
+          case ProductCategory.fashion:
+            label = '패션';
+            break;
+          case ProductCategory.home:
+            label = '가정용품';
+            break;
+          case ProductCategory.eco:
+            label = '친환경/자연';
+            break;
+        }
         return DropdownMenuItem<ProductCategory>(
           value: category,
-          child: Text(category.toString().split('.').last),
+          child: Text(label),
         );
       }).toList(),
       onChanged: (value) {

@@ -1,4 +1,6 @@
 // lib/screens/admin/product/product_detail_screen.dart
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../../../controllers/product_controller.dart';
@@ -61,18 +63,24 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   }
 
   Future<void> _loadProductDetails() async {
-    setState(() {
-      _isLoading = true;
-    });
+    // 로딩 상태를 먼저 설정
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
 
     try {
-      ProductModel? product =
+      // 상품 정보 로드
+      final product =
           await _productController.getProductDetails(widget.productId);
+
+      // 위젯이 여전히 마운트되어 있는지 확인
+      if (!mounted) return;
 
       if (product != null) {
         setState(() {
           _product = product;
-
           // 폼 초기화
           _nameController.text = product.name;
           _descriptionController.text = product.description;
@@ -84,28 +92,34 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           _isOrganic = product.isOrganic;
           _isFeatured = product.isFeatured;
           _isActive = product.isActive;
+          _isLoading = false;
         });
       } else {
-        Get.back();
+        setState(() {
+          _product = null;
+          _isLoading = false;
+        });
+
         Get.snackbar(
-          '오류',
+          '알림',
           '상품 정보를 찾을 수 없습니다.',
           snackPosition: SnackPosition.BOTTOM,
-          backgroundColor: Colors.red.withOpacity(0.1),
+          backgroundColor: Colors.orange.withOpacity(0.1),
         );
       }
     } catch (e) {
-      Get.back();
+      if (!mounted) return;
+
+      setState(() {
+        _isLoading = false;
+      });
+
       Get.snackbar(
         '오류',
         '상품 정보를 불러오는 중 문제가 발생했습니다.',
         snackPosition: SnackPosition.BOTTOM,
         backgroundColor: Colors.red.withOpacity(0.1),
       );
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
     }
   }
 
@@ -486,23 +500,27 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        ElevatedButton.icon(
-                          onPressed: () => _productController.pickImages(),
-                          icon: const Icon(Icons.photo_library),
-                          label: const Text('이미지 추가'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primaryColor,
-                            foregroundColor: Colors.white,
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _productController.pickImages(),
+                            icon: const Icon(Icons.photo_library),
+                            label: const Text('이미지 추가'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primaryColor,
+                              foregroundColor: Colors.white,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 16),
-                        ElevatedButton.icon(
-                          onPressed: () => _productController.takePicture(),
-                          icon: const Icon(Icons.camera_alt),
-                          label: const Text('사진 촬영'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue,
-                            foregroundColor: Colors.white,
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _productController.takePicture(),
+                            icon: const Icon(Icons.camera_alt),
+                            label: const Text('사진 촬영'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue,
+                              foregroundColor: Colors.white,
+                            ),
                           ),
                         ),
                       ],

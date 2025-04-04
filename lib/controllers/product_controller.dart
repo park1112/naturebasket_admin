@@ -36,6 +36,161 @@ class ProductController extends GetxController {
     loadCategories();
   }
 
+// 이 메서드를 기존 ProductController 클래스에 추가하세요
+  Future<bool> createProductExtended({
+    required String name,
+    required String description,
+    required List<String> descriptionImages,
+    required double price,
+    double? discountPrice,
+    required double sellingPrice,
+    required int stockQuantity,
+    required int maxOrderQuantity,
+    required String origin,
+    required String category,
+    required List<ProductOption> options,
+    required List<String> tags,
+    required bool isEco,
+    List<String>? ecoLabels,
+    required bool isOrganic,
+    required bool isFeatured,
+    required bool isActive,
+    DateTime? salesStartDate,
+    DateTime? salesEndDate,
+    required TaxType taxType,
+    required ShippingInfo shippingInfo,
+    double averageRating = 0.0,
+    int reviewCount = 0,
+  }) async {
+    try {
+      isLoading.value = true;
+
+      if (_authController.currentAdmin.value == null) {
+        throw Exception('인증 정보가 없습니다.');
+      }
+
+      String productId = const Uuid().v4();
+      List<String> imageUrls = await _uploadImages(productId);
+      DateTime now = DateTime.now();
+
+      // 옵션 맵 생성
+      Map<String, dynamic> optionsMap = {};
+      for (var option in options) {
+        optionsMap[option.id] = option.toMap();
+      }
+
+      Map<String, dynamic> productData = {
+        'name': name,
+        'description': description,
+        'descriptionImages': descriptionImages,
+        'price': price, // 원가
+        'discountPrice': discountPrice, // 할인가
+        'sellingPrice': sellingPrice, // 최종 판매가
+        'stockQuantity': stockQuantity,
+        'maxOrderQuantity': maxOrderQuantity,
+        'origin': origin,
+        'category': category,
+        'images': imageUrls,
+        'tags': tags,
+        'isOrganic': isOrganic,
+        'isEco': isEco,
+        'ecoLabels': ecoLabels,
+        'isFeatured': isFeatured,
+        'isActive': isActive,
+        'salesStartDate':
+            salesStartDate != null ? Timestamp.fromDate(salesStartDate) : null,
+        'salesEndDate':
+            salesEndDate != null ? Timestamp.fromDate(salesEndDate) : null,
+        'taxType': taxType.toString().split('.').last,
+        'shippingInfo': shippingInfo.toMap(),
+        'options': optionsMap,
+        'averageRating': averageRating,
+        'reviewCount': reviewCount,
+        'createdAt': Timestamp.fromDate(now),
+        'updatedAt': Timestamp.fromDate(now),
+        'createdBy': _authController.currentAdmin.value!.name,
+        'updatedBy': _authController.currentAdmin.value!.name,
+      };
+
+      await _firestore.collection('products').doc(productId).set(productData);
+      await _authController.logActivity(
+          'create_product', productId, 'product', {}, productData);
+
+      await loadProducts();
+
+      selectedImages.clear();
+      currentImages.clear();
+
+      Get.snackbar(
+        '제품 생성',
+        '제품이 성공적으로 등록되었습니다.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.green.withOpacity(0.1),
+      );
+
+      return true;
+    } catch (e) {
+      print('제품 생성 오류: $e');
+
+      String errorMessage = '제품 등록 중 오류가 발생했습니다.';
+      if (e is Exception) {
+        errorMessage = e.toString().replaceAll('Exception: ', '');
+      }
+
+      Get.snackbar(
+        '제품 등록 실패',
+        errorMessage,
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red.withOpacity(0.1),
+      );
+
+      return false;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+// 단일 이미지 선택 메서드 (설명 이미지 추가용)
+  Future<String?> pickSingleImage() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 80,
+      );
+
+      if (image != null) {
+        // 이미지 업로드 로직 (실제 구현 필요)
+        final File imageFile = File(image.path);
+
+        // 임의의 ID 생성
+        String fileName =
+            'description_${const Uuid().v4()}${path.extension(image.path)}';
+        Reference ref = _storage.ref().child('product_images').child(fileName);
+
+        // 이미지 업로드
+        await ref.putFile(imageFile);
+
+        // 다운로드 URL 가져오기
+        String downloadUrl = await ref.getDownloadURL();
+
+        return downloadUrl;
+      }
+      return null;
+    } catch (e) {
+      print('이미지 선택 오류: $e');
+      Get.snackbar(
+        '오류',
+        '이미지 선택 중 문제가 발생했습니다.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red.withOpacity(0.1),
+      );
+      return null;
+    }
+  }
+
   // 제품 목록 로드
   Future<void> loadProducts() async {
     try {
